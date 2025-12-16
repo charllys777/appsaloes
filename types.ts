@@ -14,6 +14,7 @@ export interface Professional {
   status?: 'active' | 'inactive'; 
   isSuperAdmin?: boolean; 
   slug?: string; // New field for pretty URL
+  workHours?: Record<string, string[]>; // { "Seg": ["09:00", "10:00"], ... }
 }
 
 export interface Service {
@@ -60,7 +61,7 @@ export interface DaySlot {
   date: string;
   weekday: string;
   fullDate: string;
-  times: string[];
+  times: string[]; // This will now be dynamic based on configuration
 }
 
 export interface UserData {

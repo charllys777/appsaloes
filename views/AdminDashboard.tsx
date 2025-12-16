@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { AppData, Appointment, Professional, Service, Work, Testimonial } from '../types';
 import { Button, Input, AccordionItem, ImagePicker } from '../components/Shared';
-import { Trash2, Plus, LogOut, X, CalendarDays, Clock, DollarSign, TrendingUp, Award, User, Briefcase, Palette, Image as ImageIcon, MessageSquare, Star, Quote, MessageCircle, Share2, Copy, ExternalLink, Check, Globe, Loader2, AlertTriangle } from 'lucide-react';
+import { Trash2, Plus, LogOut, X, CalendarDays, Clock, DollarSign, TrendingUp, Award, User, Briefcase, Palette, Image as ImageIcon, MessageSquare, Star, Quote, MessageCircle, Share2, Copy, ExternalLink, Check, Globe, Loader2, AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react';
 import { api } from '../services/api';
 
 interface AdminProps {
@@ -13,14 +13,16 @@ interface AdminProps {
   userId: string; // Add userId prop
 }
 
+const WEEKDAYS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+const BASE_HOURS = Array.from({length: 14}, (_, i) => `${(i + 7).toString().padStart(2, '0')}:00`); // 07:00 to 20:00
+
 export const AdminDashboard: React.FC<AdminProps> = ({ data, onUpdate, onLogout, theme, userId }) => {
   const [openSection, setOpenSection] = useState<string | null>('agenda');
   const [isSaving, setIsSaving] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
   
-  // New State for Custom Delete Modal
-  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
-  const [isDeleting, setIsDeleting] = useState(false);
+  // Deleting state per ID to show spinner on the specific button
+  const [deletingIds, setDeletingIds] = useState<Record<string, boolean>>({});
 
   // Notification State: Persist seen count to localStorage
   const [lastSeenCount, setLastSeenCount] = useState(() => {
@@ -34,6 +36,9 @@ export const AdminDashboard: React.FC<AdminProps> = ({ data, onUpdate, onLogout,
   const [professional, setProfessional] = useState<Professional>(data.professional);
   const [appointments, setAppointments] = useState<Appointment[]>(data.appointments);
   const [testimonials, setTestimonials] = useState<Testimonial[]>(data.testimonials || []);
+  
+  // State for Hours Editor
+  const [expandedDay, setExpandedDay] = useState<string | null>(null);
 
   // Sync state when parent data changes
   useEffect(() => {
@@ -83,24 +88,17 @@ export const AdminDashboard: React.FC<AdminProps> = ({ data, onUpdate, onLogout,
     setTimeout(() => setCopySuccess(false), 2000);
   };
 
-  // 1. Trigger Modal
-  const requestDelete = (e: React.MouseEvent, id: string) => {
+  // IMMEDIATE DELETE: Appointments
+  const deleteAppointmentImmediately = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     e.preventDefault();
-    setConfirmDeleteId(id);
-  };
 
-  // 2. Execute Delete (Called by Modal)
-  const executeDelete = async () => {
-    if (!confirmDeleteId) return;
-    
-    setIsDeleting(true);
-    const id = confirmDeleteId;
+    setDeletingIds(prev => ({ ...prev, [id]: true }));
 
     try {
         await api.postData('delete_appointment', { id }, userId);
         
-        // Update local state
+        // Update local state immediately
         setAppointments(prev => prev.filter(a => a.id !== id));
         
         // Update notification count
@@ -110,17 +108,89 @@ export const AdminDashboard: React.FC<AdminProps> = ({ data, onUpdate, onLogout,
              localStorage.setItem(`seen_apts_${userId}`, newCount.toString());
         }
 
-        // Fetch latest data
+        // Fetch latest data quietly
         onUpdate();
-        console.log("Sucesso ao deletar.");
     } catch (e) {
         console.error("Erro ao deletar:", e);
         alert("Erro ao deletar. Tente novamente.");
     } finally {
-        setIsDeleting(false);
-        setConfirmDeleteId(null); // Close modal
+        setDeletingIds(prev => {
+            const newState = { ...prev };
+            delete newState[id];
+            return newState;
+        });
     }
   };
+
+  // IMMEDIATE DELETE: Services
+  const deleteServiceImmediately = async (e: React.MouseEvent, id: string) => {
+      e.stopPropagation();
+      setDeletingIds(prev => ({ ...prev, [id]: true }));
+
+      // Optimistic Update
+      const updatedServices = services.filter(s => s.id !== id);
+      setServices(updatedServices);
+
+      try {
+          await api.postData('update_services', updatedServices, userId);
+          onUpdate(); // Background sync
+      } catch (e) {
+          alert("Erro ao excluir serviço. Tente novamente.");
+          setServices(services); // Revert on error
+      } finally {
+          setDeletingIds(prev => {
+            const newState = { ...prev };
+            delete newState[id];
+            return newState;
+        });
+      }
+  }
+
+  // IMMEDIATE DELETE: Works
+  const deleteWorkImmediately = async (e: React.MouseEvent, id: string) => {
+      e.stopPropagation();
+      setDeletingIds(prev => ({ ...prev, [id]: true }));
+      
+      const updatedWorks = works.filter(w => w.id !== id);
+      setWorks(updatedWorks);
+
+      try {
+          await api.postData('update_works', updatedWorks, userId);
+          onUpdate();
+      } catch (e) {
+          alert("Erro ao excluir trabalho. Tente novamente.");
+          setWorks(works);
+      } finally {
+          setDeletingIds(prev => {
+            const newState = { ...prev };
+            delete newState[id];
+            return newState;
+        });
+      }
+  }
+
+  // IMMEDIATE DELETE: Testimonials
+  const deleteTestimonialImmediately = async (e: React.MouseEvent, id: string) => {
+      e.stopPropagation();
+      setDeletingIds(prev => ({ ...prev, [id]: true }));
+
+      const updatedTestimonials = testimonials.filter(t => t.id !== id);
+      setTestimonials(updatedTestimonials);
+
+      try {
+          await api.postData('update_testimonials', updatedTestimonials, userId);
+          onUpdate();
+      } catch (e) {
+          alert("Erro ao excluir depoimento.");
+          setTestimonials(testimonials);
+      } finally {
+          setDeletingIds(prev => {
+            const newState = { ...prev };
+            delete newState[id];
+            return newState;
+        });
+      }
+  }
 
   const handleSaveServices = async () => {
     setIsSaving(true);
@@ -153,19 +223,24 @@ export const AdminDashboard: React.FC<AdminProps> = ({ data, onUpdate, onLogout,
       setIsSaving(true);
       
       const updatedProfile = { ...professional };
-      if (!updatedProfile.slug) {
-          updatedProfile.slug = generateSlug(updatedProfile.nome);
+      if (!updatedProfile.slug || updatedProfile.slug.trim() === '') {
+          updatedProfile.slug = generateSlug(updatedProfile.nome || 'studio');
       }
+      // Ensure slug is clean
+      updatedProfile.slug = generateSlug(updatedProfile.slug);
+      
       setProfessional(updatedProfile);
 
       try {
           await api.postData('update_profile', updatedProfile, userId);
           await onUpdate();
-          alert("Perfil salvo com sucesso!");
+          alert("Perfil e Horários salvos com sucesso!");
       } catch (e: any) {
           console.error(e);
-          if (e.message?.includes('slug')) {
-              alert("Erro: Este nome de link já está sendo usado por outro estúdio. Por favor, altere o campo 'Personalizar Link' para algo único.");
+          if (e.message?.includes('work_hours') || e.code === 'PGRST204') {
+              alert("ERRO CRÍTICO DE BANCO DE DADOS:\nA coluna 'work_hours' não existe na tabela 'profile'.\n\nPor favor, execute o comando SQL fornecido no chat do assistente para criar a coluna.");
+          } else if (e.message?.includes('duplicate key') || e.code === '23505') {
+              alert("Erro: Este Link Personalizado já está sendo usado por outro estúdio. Por favor, escolha outro.");
           } else {
               alert("Erro ao salvar perfil: " + (e.message || "Erro de conexão"));
           }
@@ -186,6 +261,24 @@ export const AdminDashboard: React.FC<AdminProps> = ({ data, onUpdate, onLogout,
           setIsSaving(false);
       }
   }
+
+  // --- Hours Logic ---
+  const toggleHour = (day: string, hour: string) => {
+      const currentHours = professional.workHours?.[day] || [];
+      let newHours;
+      if (currentHours.includes(hour)) {
+          newHours = currentHours.filter(h => h !== hour);
+      } else {
+          newHours = [...currentHours, hour].sort();
+      }
+      setProfessional({
+          ...professional,
+          workHours: {
+              ...professional.workHours,
+              [day]: newHours
+          }
+      });
+  };
 
   // --- Finance Logic ---
   const financeData = React.useMemo(() => {
@@ -293,11 +386,12 @@ export const AdminDashboard: React.FC<AdminProps> = ({ data, onUpdate, onLogout,
                              
                              <button 
                                 type="button"
-                                onClick={(e) => requestDelete(e, apt.id)} 
+                                onClick={(e) => deleteAppointmentImmediately(e, apt.id)} 
+                                disabled={deletingIds[apt.id]}
                                 className="flex-shrink-0 p-2 bg-red-50 text-red-500 rounded-lg shadow-sm hover:bg-red-100 transition-colors flex items-center justify-center cursor-pointer active:scale-95"
                                 title="Excluir Agendamento"
                              >
-                                <Trash2 size={16}/>
+                                {deletingIds[apt.id] ? <Loader2 size={16} className="animate-spin"/> : <Trash2 size={16}/>}
                              </button>
                         </div>
                         
@@ -335,6 +429,69 @@ export const AdminDashboard: React.FC<AdminProps> = ({ data, onUpdate, onLogout,
                 ))}
             </div>
         </AccordionItem>
+        
+        {/* CARD: CONFIGURAÇÃO DE HORÁRIOS */}
+        <AccordionItem 
+            id="work_hours" 
+            title="Configurar Horários" 
+            icon={<Clock />} 
+            isOpen={openSection === 'work_hours'} 
+            onToggle={() => toggleSection('work_hours')} 
+            theme={theme}
+        >
+             <div className="space-y-4">
+                 <p className="text-xs text-stone-500 mb-2">Selecione os dias e horários que você atende. Dias sem horários selecionados aparecerão como "Fechado".</p>
+                 
+                 <div className="grid gap-2">
+                     {WEEKDAYS.map(day => {
+                         const hours = professional.workHours?.[day] || [];
+                         const isExpanded = expandedDay === day;
+                         const isOpenDay = hours.length > 0;
+
+                         return (
+                             <div key={day} className="border rounded-xl overflow-hidden" style={{ borderColor: theme.border }}>
+                                 <div 
+                                    onClick={() => setExpandedDay(isExpanded ? null : day)}
+                                    className={`flex items-center justify-between p-3 cursor-pointer transition-colors ${isExpanded ? 'bg-stone-50' : 'bg-white'}`}
+                                 >
+                                     <div className="flex items-center gap-3">
+                                         <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${isOpenDay ? 'bg-emerald-100 text-emerald-700' : 'bg-stone-100 text-stone-400'}`}>
+                                             {day}
+                                         </div>
+                                         <div className="flex flex-col">
+                                            <span className="text-xs font-bold text-stone-700">{isOpenDay ? 'Aberto' : 'Fechado'}</span>
+                                            {isOpenDay && <span className="text-[10px] text-stone-400">{hours.length} horários</span>}
+                                         </div>
+                                     </div>
+                                     {isExpanded ? <ChevronUp size={16} className="text-stone-400"/> : <ChevronDown size={16} className="text-stone-400"/>}
+                                 </div>
+                                 
+                                 {isExpanded && (
+                                     <div className="p-3 bg-stone-50 border-t border-dashed grid grid-cols-4 gap-2" style={{ borderColor: theme.border }}>
+                                         {BASE_HOURS.map(h => {
+                                             const isActive = hours.includes(h);
+                                             return (
+                                                 <button 
+                                                    key={h}
+                                                    onClick={() => toggleHour(day, h)}
+                                                    className={`py-1.5 rounded-md text-[10px] font-bold transition-all ${isActive ? 'bg-emerald-500 text-white shadow-md shadow-emerald-200' : 'bg-white text-stone-400 border border-stone-200'}`}
+                                                 >
+                                                     {h}
+                                                 </button>
+                                             )
+                                         })}
+                                     </div>
+                                 )}
+                             </div>
+                         )
+                     })}
+                 </div>
+
+                 <Button onClick={handleSaveProfile} className="w-full mt-4" style={{ backgroundColor: theme.button }} disabled={isSaving}>
+                    {isSaving ? 'Salvando...' : 'Salvar Horários'}
+                </Button>
+             </div>
+        </AccordionItem>
 
         {/* CARD 2: FINANCEIRO */}
         <AccordionItem id="finance" title="Financeiro (Mês)" icon={<TrendingUp />} isOpen={openSection === 'finance'} onToggle={() => toggleSection('finance')} theme={theme}>
@@ -361,10 +518,12 @@ export const AdminDashboard: React.FC<AdminProps> = ({ data, onUpdate, onLogout,
                              <span className="text-[10px] uppercase font-bold tracking-wider" style={{ color: theme.subtext }}>Serviço #{index + 1}</span>
                              <button 
                                 type="button" 
-                                onClick={(e) => { e.stopPropagation(); setServices(services.filter(s => s.id !== service.id)); }} 
+                                onClick={(e) => deleteServiceImmediately(e, service.id)} 
+                                disabled={deletingIds[service.id]}
                                 className="flex items-center gap-1 px-2 py-1 bg-red-50 text-red-500 rounded-md shadow-sm hover:bg-red-100 transition-colors cursor-pointer"
                             >
-                                <Trash2 size={12}/> <span className="text-[10px] font-bold">Excluir</span>
+                                {deletingIds[service.id] ? <Loader2 size={12} className="animate-spin"/> : <Trash2 size={12}/>}
+                                <span className="text-[10px] font-bold">Excluir</span>
                             </button>
                         </div>
                         <div className="flex gap-2">
@@ -413,10 +572,12 @@ export const AdminDashboard: React.FC<AdminProps> = ({ data, onUpdate, onLogout,
                              <span className="text-[10px] uppercase font-bold tracking-wider" style={{ color: theme.subtext }}>Trabalho #{idx + 1}</span>
                              <button 
                                 type="button" 
-                                onClick={(e) => { e.stopPropagation(); setWorks(works.filter(w => w.id !== work.id)); }} 
+                                onClick={(e) => deleteWorkImmediately(e, work.id)} 
+                                disabled={deletingIds[work.id]}
                                 className="flex items-center gap-1 px-2 py-1 bg-red-50 text-red-500 rounded-md shadow-sm hover:bg-red-100 transition-colors cursor-pointer"
                             >
-                                <Trash2 size={12}/> <span className="text-[10px] font-bold">Excluir</span>
+                                {deletingIds[work.id] ? <Loader2 size={12} className="animate-spin"/> : <Trash2 size={12}/>}
+                                <span className="text-[10px] font-bold">Excluir</span>
                             </button>
                         </div>
                          <Input label="Título do Trabalho" value={work.titulo} onChange={e => {
@@ -461,10 +622,12 @@ export const AdminDashboard: React.FC<AdminProps> = ({ data, onUpdate, onLogout,
                              <span className="text-[10px] uppercase font-bold tracking-wider" style={{ color: theme.subtext }}>Depoimento #{idx + 1}</span>
                              <button 
                                 type="button" 
-                                onClick={(e) => { e.stopPropagation(); setTestimonials(testimonials.filter(item => item.id !== t.id)); }} 
+                                onClick={(e) => deleteTestimonialImmediately(e, t.id)} 
+                                disabled={deletingIds[t.id]}
                                 className="flex items-center gap-1 px-2 py-1 bg-red-50 text-red-500 rounded-md shadow-sm hover:bg-red-100 transition-colors cursor-pointer"
                             >
-                                <Trash2 size={12}/> <span className="text-[10px] font-bold">Excluir</span>
+                                {deletingIds[t.id] ? <Loader2 size={12} className="animate-spin"/> : <Trash2 size={12}/>}
+                                <span className="text-[10px] font-bold">Excluir</span>
                             </button>
                         </div>
                          <div className="flex gap-2 items-center">
@@ -562,47 +725,6 @@ export const AdminDashboard: React.FC<AdminProps> = ({ data, onUpdate, onLogout,
              </div>
         </AccordionItem>
       </div>
-
-      {/* CUSTOM CONFIRMATION MODAL */}
-      {confirmDeleteId && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
-              <div 
-                className="w-full max-w-sm rounded-3xl p-6 shadow-2xl scale-100 animate-in zoom-in-95 duration-200 border bg-white"
-                style={{ backgroundColor: theme.card, borderColor: theme.border }}
-              >
-                  <div className="flex flex-col items-center text-center gap-4">
-                      <div className="w-16 h-16 rounded-full bg-red-50 flex items-center justify-center animate-pulse">
-                          <AlertTriangle className="text-red-500" size={32} />
-                      </div>
-                      <div>
-                          <h3 className="text-lg font-bold mb-1" style={{ color: theme.text }}>Tem certeza?</h3>
-                          <p className="text-sm leading-relaxed" style={{ color: theme.subtext }}>
-                              Essa ação irá excluir o agendamento permanentemente. Não é possível desfazer.
-                          </p>
-                      </div>
-                      
-                      <div className="flex gap-3 w-full mt-2">
-                          <button 
-                            onClick={() => setConfirmDeleteId(null)}
-                            className="flex-1 py-3.5 rounded-xl font-bold uppercase text-xs border transition-colors hover:bg-stone-50"
-                            style={{ borderColor: theme.border, color: theme.subtext }}
-                          >
-                              Cancelar
-                          </button>
-                          <button 
-                            onClick={executeDelete}
-                            disabled={isDeleting}
-                            className="flex-1 py-3.5 rounded-xl font-bold uppercase text-xs text-white shadow-lg bg-red-500 hover:bg-red-600 transition-colors flex items-center justify-center gap-2"
-                          >
-                              {isDeleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-                              {isDeleting ? 'Excluindo...' : 'Sim, Excluir'}
-                          </button>
-                      </div>
-                  </div>
-              </div>
-          </div>
-      )}
-
     </div>
   );
 };

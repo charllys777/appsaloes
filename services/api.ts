@@ -7,6 +7,17 @@ const supabaseUrl = "https://jsfvhgptbtehdarlihvj.supabase.co";
 const supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpzZnZoZ3B0YnRlaGRhcmxpaHZqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU0MTk0ODYsImV4cCI6MjA4MDk5NTQ4Nn0.y3u1S5OKHNnoEwyZZ8oHHNQVgj5dsYThe2cohH1uIE4";
 const supabase = createClient(supabaseUrl, supabaseKey);
 
+// Default Standard Hours
+const DEFAULT_HOURS = {
+  'Seg': ['09:00', '10:00', '11:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00'],
+  'Ter': ['09:00', '10:00', '11:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00'],
+  'Qua': ['09:00', '10:00', '11:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00'],
+  'Qui': ['09:00', '10:00', '11:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00'],
+  'Sex': ['09:00', '10:00', '11:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00'],
+  'Sáb': ['09:00', '10:00', '11:00', '12:00'],
+  'Dom': []
+};
+
 // Default profile
 const DEFAULT_PROFILE: Professional = {
   id: "temp",
@@ -21,7 +32,8 @@ const DEFAULT_PROFILE: Professional = {
   whatsapp: "",
   theme: "rose",
   status: 'active',
-  slug: ''
+  slug: '',
+  workHours: DEFAULT_HOURS
 };
 
 export const api = {
@@ -104,19 +116,23 @@ export const api = {
           const { data } = await supabase.from('profile').select('*').eq('user_id', userIdOrSlug).single();
           profileData = data;
       } else {
+          // If it's a slug, find the real UUID
           const { data } = await supabase.from('profile').select('*').eq('slug', userIdOrSlug).single();
           if (data) {
               profileData = data;
-              userId = data.user_id;
+              userId = data.user_id; // CRITICAL: Switch to the real UUID for next queries
+          } else {
+              // If searching by slug and not found, stop here to avoid UUID errors
+              console.warn("Profile not found by slug:", userIdOrSlug);
+              return { professional: DEFAULT_PROFILE, services: [], works: [], appointments: [], careItems: [], testimonials: [] };
           }
       }
 
-      // Important: Even if profileData is null (new user), we MUST fetch related tables using the UUID
-      // This fixes the issue where services disappear because the profile wasn't created yet.
+      // Final check: Do we have a valid UUID to query related tables?
       const targetId = profileData ? profileData.user_id : (isUuid ? userId : null);
 
       if (!targetId) {
-          throw new Error("Perfil não encontrado");
+          return { professional: DEFAULT_PROFILE, services: [], works: [], appointments: [], careItems: [], testimonials: [] };
       }
       
       const { data: servicesData } = await supabase.from('services').select('*').eq('user_id', targetId).order('id');
@@ -140,7 +156,8 @@ export const api = {
         theme: p.theme || 'rose',
         status: p.status || 'active',
         isSuperAdmin: p.is_super_admin || false,
-        slug: p.slug || ''
+        slug: p.slug || '',
+        workHours: p.work_hours || DEFAULT_HOURS
       };
 
       const services: Service[] = (servicesData || []).map((s: any) => ({
@@ -365,7 +382,8 @@ export const api = {
                 logo_url: p.logo,
                 google_maps_link: p.linkMaps,
                 theme: p.theme,
-                slug: p.slug
+                slug: p.slug,
+                work_hours: p.workHours
             };
 
             const { error } = await supabase.from('profile').upsert(profileData, { onConflict: 'user_id' });

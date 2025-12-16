@@ -14,58 +14,88 @@ const Root = () => {
   const [publicUserId, setPublicUserId] = useState<string | null>(null);
 
   useEffect(() => {
-    const checkSession = async () => {
-        // 1. Check for Public URL param (?u=USER_ID)
-        const params = new URLSearchParams(window.location.search);
-        const uid = params.get('u');
+    let isMounted = true;
+    
+    // Failsafe: Force loading to stop after 5 seconds if something hangs
+    const safetyTimer = setTimeout(() => {
+        if (isMounted && isLoading) setIsLoading(false);
+    }, 5000);
 
-        if (uid) {
-            setPublicUserId(uid);
-            setIsLoading(false);
-            return;
-        }
+    const initApp = async () => {
+        try {
+            // 1. Check for Public URL param (?u=USER_ID)
+            const params = new URLSearchParams(window.location.search);
+            const uid = params.get('u');
 
-        // 2. Check Session
-        const { data: { session } } = await api.getSession();
-        setSession(session);
-
-        if (session?.user) {
-            // Check Super Admin Permission
-            try {
-                const isAdmin = await api.isSuperAdmin(session.user.id, session.user.email);
-                setIsSuperAdmin(isAdmin);
-            } catch (e) {
-                console.error("Error checking permissions", e);
-                setIsSuperAdmin(false);
+            if (uid) {
+                if (isMounted) setPublicUserId(uid);
+                // We don't need to check session if viewing a public profile
+                return; 
             }
-        }
 
-        setIsLoading(false);
+            // 2. Check Session
+            const { data } = await api.getSession();
+            const currentSession = data?.session;
+            
+            if (isMounted) setSession(currentSession);
+
+            if (currentSession?.user) {
+                // Check Super Admin Permission
+                try {
+                    const isAdmin = await api.isSuperAdmin(currentSession.user.id, currentSession.user.email);
+                    if (isMounted) setIsSuperAdmin(isAdmin);
+                } catch (e) {
+                    console.error("Error checking permissions", e);
+                    if (isMounted) setIsSuperAdmin(false);
+                }
+            }
+        } catch (error) {
+            console.error("Initialization error:", error);
+        } finally {
+            // CRITICAL: Always turn off loading, even if errors occur
+            if (isMounted) setIsLoading(false);
+            clearTimeout(safetyTimer);
+        }
     };
 
-    checkSession();
+    initApp();
 
     const { data: { subscription } } = api.onAuthStateChange(async (_event, session) => {
-      setSession(session);
-      if (session?.user) {
-          const isAdmin = await api.isSuperAdmin(session.user.id, session.user.email);
-          setIsSuperAdmin(isAdmin);
-      } else {
-          setIsSuperAdmin(false);
+      if (isMounted) {
+          setSession(session);
+          if (session?.user) {
+              try {
+                const isAdmin = await api.isSuperAdmin(session.user.id, session.user.email);
+                setIsSuperAdmin(isAdmin);
+              } catch { setIsSuperAdmin(false); }
+          } else {
+              setIsSuperAdmin(false);
+          }
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+        isMounted = false;
+        clearTimeout(safetyTimer);
+        subscription.unsubscribe();
+    };
   }, []);
 
   const handleLogout = async () => {
-      await api.signOut();
-      window.location.href = window.location.origin;
+      try {
+        await api.signOut();
+      } catch (e) {
+        console.error("Logout error", e);
+      }
+      // Simply clear state to show AuthScreen without forcing a URL redirect (avoids 404)
+      setSession(null);
+      setIsSuperAdmin(false);
+      setPublicUserId(null);
   };
 
   if (isLoading) return <LoadingScreen />;
 
-  // Scenario A: Super Admin Login (Either Charllys or DB Permission)
+  // Scenario A: Super Admin Login
   if (isSuperAdmin) {
       return <SuperAdminDashboard onLogout={handleLogout} />;
   }

@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo } from 'react';
 import { Service, Professional } from '../types';
 import { Button, Input } from './Shared';
@@ -39,15 +40,18 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({ services, professional
     setClientPhone(val);
   };
 
-  // Generate available times (09:00 to 18:00)
+  // Dynamic available times based on selection
   const availableTimes = useMemo(() => {
-    const times = [];
-    for (let i = 9; i <= 18; i++) {
-      times.push(`${i.toString().padStart(2, '0')}:00`);
-      if (i !== 18) times.push(`${i.toString().padStart(2, '0')}:30`);
-    }
-    return times;
-  }, []);
+      if (!date) return [];
+      const [year, month, day] = date.split('-').map(Number);
+      const dateObj = new Date(year, month - 1, day);
+      
+      const weekdayStr = dateObj.toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', '');
+      // Match format "Seg", "Ter"
+      const weekdayKey = weekdayStr.charAt(0).toUpperCase() + weekdayStr.slice(1);
+      
+      return professional.workHours?.[weekdayKey] || [];
+  }, [date, professional.workHours]);
 
   const handleNext = () => {
     if (step === 1 && selectedServices.length === 0) return;
@@ -61,8 +65,16 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({ services, professional
     setIsSubmitting(true);
     const serviceNames = services.filter(s => selectedServices.includes(s.id)).map(s => s.nome);
     
+    // Parse Date for correct format
+    const [year, month, day] = date.split('-');
+    const dateFormatted = `${day}/${month}`;
+    const dateObj = new Date(Number(year), Number(month) - 1, Number(day));
+    const weekdayStr = dateObj.toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', '');
+    const weekdayKey = weekdayStr.charAt(0).toUpperCase() + weekdayStr.slice(1);
+
     const appointmentData = {
-      data: date,
+      data: dateFormatted,
+      weekday: weekdayKey,
       hora: time,
       clienteNome: clientName,
       clienteTelefone: clientPhone,
@@ -75,7 +87,7 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({ services, professional
       await api.postData('create_appointment', appointmentData, userId);
 
       // 2. WhatsApp Redirect
-      const message = `Olá! Gostaria de confirmar meu agendamento:%0A%0A*Nome:* ${clientName}%0A*Data:* ${date.split('-').reverse().join('/')} às ${time}%0A*Serviços:* ${serviceNames.join(', ')}%0A*Total:* ${formatBRL(total)}`;
+      const message = `Olá! Gostaria de confirmar meu agendamento:%0A%0A*Nome:* ${clientName}%0A*Data:* ${dateFormatted} (${weekdayKey}) às ${time}%0A*Serviços:* ${serviceNames.join(', ')}%0A*Total:* ${formatBRL(total)}`;
       const wppUrl = `https://wa.me/${professional.whatsapp.replace(/\D/g, '')}?text=${message}`;
       
       window.location.href = wppUrl;
@@ -174,7 +186,7 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({ services, professional
                     className="w-full p-3 bg-white border border-stone-200 rounded-lg outline-none focus:border-rose-300"
                     min={new Date().toISOString().split('T')[0]}
                     value={date}
-                    onChange={(e) => setDate(e.target.value)}
+                    onChange={(e) => { setDate(e.target.value); setTime(''); }}
                 />
                 <Calendar className="absolute right-3 top-3 text-stone-400 pointer-events-none" size={20}/>
             </div>
@@ -183,7 +195,7 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({ services, professional
         <div>
             <label className="block text-sm font-medium text-stone-600 mb-1">Horário</label>
             <div className="grid grid-cols-4 gap-2">
-                {availableTimes.map(t => (
+                {availableTimes.length > 0 ? availableTimes.map(t => (
                     <button
                         key={t}
                         onClick={() => setTime(t)}
@@ -191,7 +203,11 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({ services, professional
                     >
                         {t}
                     </button>
-                ))}
+                )) : (
+                    <p className="col-span-4 text-xs text-stone-400 text-center py-2">
+                        {date ? "Nenhum horário disponível." : "Selecione uma data."}
+                    </p>
+                )}
             </div>
         </div>
 

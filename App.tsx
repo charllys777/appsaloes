@@ -54,21 +54,20 @@ const THEMES = {
 const generateDays = (): DaySlot[] => {
   const days: DaySlot[] = [];
   const today = new Date();
-  const baseTimes = ['09:00', '10:00', '11:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00'];
-
+  
   for (let i = 0; i < 30; i++) {
     const d = new Date(today);
     d.setDate(today.getDate() + i);
-    if (d.getDay() === 0) continue; // Pula Domingo
-
+    
     const weekday = d.toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', '');
     const dateStr = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+    const fullWeekday = weekday.charAt(0).toUpperCase() + weekday.slice(1);
 
     days.push({
       date: dateStr,
-      weekday: weekday.charAt(0).toUpperCase() + weekday.slice(1),
+      weekday: fullWeekday,
       fullDate: d.toISOString().split('T')[0],
-      times: d.getDay() === 6 ? baseTimes.slice(0, 4) : baseTimes // Sábado até 13h
+      times: [] // Filled dynamically
     });
   }
   return days;
@@ -152,7 +151,8 @@ const App: React.FC<AppProps> = ({ session, publicProfileId }) => {
     linkMaps: '', 
     whatsapp: '', 
     theme: 'rose',
-    status: 'active'
+    status: 'active',
+    workHours: {}
   });
   const [services, setServices] = useState<Service[]>([]);
   const [works, setWorks] = useState<Work[]>([]);
@@ -161,6 +161,8 @@ const App: React.FC<AppProps> = ({ session, publicProfileId }) => {
 
   const [isAdminMode, setIsAdminMode] = useState(false);
   const [showSecurityModal, setShowSecurityModal] = useState(false);
+  
+  // Set initial loading state
   const [isLoading, setIsLoading] = useState(true);
   
   // Security Modal State
@@ -180,7 +182,11 @@ const App: React.FC<AppProps> = ({ session, publicProfileId }) => {
   const theme = THEMES[professional.theme || 'rose'] || THEMES.rose;
 
   const loadData = useCallback(async () => {
-    if (!userId) return;
+    if (!userId) {
+        setIsLoading(false);
+        return;
+    }
+
     setIsLoading(true);
     try {
       const data = await api.fetchData(userId);
@@ -204,9 +210,12 @@ const App: React.FC<AppProps> = ({ session, publicProfileId }) => {
   }), [userId]);
 
   const handleLogout = async () => {
-      await api.signOut();
-      // Force redirect to root to ensure clear state and AuthScreen mount
-      window.location.href = window.location.origin;
+      try {
+        await api.signOut();
+      } catch (e) {
+          console.error(e);
+      }
+      // No forced redirect here. The state change in index.tsx via onAuthStateChange will handle the UI switch.
   };
 
   const handleAdminAccess = () => {
@@ -274,6 +283,25 @@ const App: React.FC<AppProps> = ({ session, publicProfileId }) => {
     const msg = `Olá, ${professional.nome}! ✨\n\nAqui é *${userData.name}*.\nAcabei de pré-agendar:\n\n🗓 *Data:* ${selectedDay?.date} (${selectedDay?.weekday})\n⏰ *Horário:* ${selectedTime}\n💆‍♀️ *Serviço:* ${serviceNames}\n💰 *Total:* R$ ${total},00\n\nPodemos confirmar?`;
     window.open(`https://wa.me/55${professional.whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`, '_blank');
   };
+
+  // --- Dynamic Time Calculation ---
+  const getAvailableTimesForDay = (day: DaySlot) => {
+    // 1. Get Configured Hours for this weekday
+    const configuredHours = professional.workHours?.[day.weekday] || [];
+    
+    // 2. Filter out Booked Hours
+    // The issue was string comparison. 
+    // day.date is "DD/MM" (e.g., "06/10")
+    // appointment.data (from API view) usually comes as "DD/MM (WeekDay)" e.g. "06/10 (Dom)"
+    // We need to check if appointment.data contains the date.
+    
+    const bookedTimes = appointments
+        .filter(apt => apt.data && apt.data.includes(day.date))
+        .map(apt => apt.hora);
+        
+    return configuredHours.filter(time => !bookedTimes.includes(time));
+  };
+
 
   if (isLoading) return <LoadingScreen />;
 
@@ -435,20 +463,37 @@ const App: React.FC<AppProps> = ({ session, publicProfileId }) => {
             {bookingStep === 2 && (
                 <div className="space-y-5 animate-fade-in">
                     <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
-                        {NEXT_DAYS.map((day, idx) => (
-                            <button key={idx} onClick={() => { setSelectedDay(day); setSelectedTime(null); }} className={`flex-shrink-0 w-16 h-20 rounded-2xl border flex flex-col items-center justify-center transition-all ${selectedDay?.date === day.date ? 'shadow-md scale-105' : 'opacity-70'}`} style={{ backgroundColor: selectedDay?.date === day.date ? theme.button : theme.card, borderColor: selectedDay?.date === day.date ? theme.button : theme.border }}>
-                                <span className="text-[10px] font-bold uppercase" style={{ color: selectedDay?.date === day.date ? theme.buttonText : theme.subtext }}>{day.weekday}</span>
-                                <span className="text-sm font-bold" style={{ color: selectedDay?.date === day.date ? theme.buttonText : theme.text }}>{day.date}</span>
-                            </button>
-                        ))}
+                        {NEXT_DAYS.map((day, idx) => {
+                            // Only show days that have configured hours
+                            const availableTimes = getAvailableTimesForDay(day);
+                            const hasTimes = availableTimes.length > 0;
+                            const isConfiguredOpen = (professional.workHours?.[day.weekday] || []).length > 0;
+                            
+                            // If day is configured open but all slots taken, we still show it but full
+                            // If day is NOT configured open, we hide it or show disabled.
+                            // Let's hide closed days for cleaner UI.
+                            if (!isConfiguredOpen) return null;
+
+                            return (
+                                <button key={idx} onClick={() => { setSelectedDay(day); setSelectedTime(null); }} className={`flex-shrink-0 w-16 h-20 rounded-2xl border flex flex-col items-center justify-center transition-all ${selectedDay?.date === day.date ? 'shadow-md scale-105' : 'opacity-70'}`} style={{ backgroundColor: selectedDay?.date === day.date ? theme.button : theme.card, borderColor: selectedDay?.date === day.date ? theme.button : theme.border }}>
+                                    <span className="text-[10px] font-bold uppercase" style={{ color: selectedDay?.date === day.date ? theme.buttonText : theme.subtext }}>{day.weekday}</span>
+                                    <span className="text-sm font-bold" style={{ color: selectedDay?.date === day.date ? theme.buttonText : theme.text }}>{day.date}</span>
+                                </button>
+                            );
+                        })}
                     </div>
                     {selectedDay && (
-                        <div className="grid grid-cols-3 gap-2 animate-fade-in">
-                            {selectedDay.times.map(time => (
-                                <button key={time} onClick={() => setSelectedTime(time)} className={`p-3 rounded-xl border text-[10px] font-bold transition-all ${selectedTime === time ? 'shadow-md' : ''}`} style={{ backgroundColor: selectedTime === time ? theme.accent : theme.bg, color: selectedTime === time ? theme.buttonText : theme.text, borderColor: selectedTime === time ? theme.accent : theme.border }}>
-                                    {time}
-                                </button>
-                            ))}
+                        <div className="animate-fade-in">
+                            <div className="grid grid-cols-3 gap-2">
+                                {getAvailableTimesForDay(selectedDay).map(time => (
+                                    <button key={time} onClick={() => setSelectedTime(time)} className={`p-3 rounded-xl border text-[10px] font-bold transition-all ${selectedTime === time ? 'shadow-md' : ''}`} style={{ backgroundColor: selectedTime === time ? theme.accent : theme.bg, color: selectedTime === time ? theme.buttonText : theme.text, borderColor: selectedTime === time ? theme.accent : theme.border }}>
+                                        {time}
+                                    </button>
+                                ))}
+                            </div>
+                            {getAvailableTimesForDay(selectedDay).length === 0 && (
+                                <p className="text-center text-xs py-4 opacity-50">Sem horários disponíveis para este dia.</p>
+                            )}
                         </div>
                     )}
                     <div className="flex gap-3 pt-4"><button onClick={() => setBookingStep(1)} className="flex-1 py-4 text-xs font-bold uppercase" style={{ color: theme.subtext }}>Voltar</button><button disabled={!selectedDay || !selectedTime} onClick={finishBooking} className="flex-1 text-white py-4 rounded-2xl text-xs font-bold uppercase disabled:opacity-50 shadow-lg" style={{ backgroundColor: theme.accent }}>Confirmar</button></div>

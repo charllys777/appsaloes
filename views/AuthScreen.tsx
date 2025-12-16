@@ -63,13 +63,13 @@ export const AuthScreen: React.FC = () => {
   return (
     <div className="min-h-screen flex items-center justify-center p-6 bg-rose-50 font-sans transition-all duration-500 relative">
       
-      {/* Super Admin Toggle Lock */}
+      {/* Super Admin Toggle Lock - FIXED POSITION to prevent disappearing */}
       <button 
         onClick={toggleMode} 
-        className={`absolute top-4 right-4 p-2 rounded-full transition-all ${isSuperAdminMode ? 'bg-stone-800 text-white' : 'text-rose-200 hover:text-rose-400'}`}
+        className={`fixed top-5 right-5 z-50 p-3 rounded-full transition-all shadow-lg border border-white/20 hover:scale-110 active:scale-95 ${isSuperAdminMode ? 'bg-stone-800 text-white' : 'bg-white text-stone-400 hover:text-rose-400'}`}
         title={isSuperAdminMode ? "Sair do modo Admin" : "Acesso Super Admin"}
       >
-          <Lock size={16} />
+          <Lock size={18} />
       </button>
 
       <div className={`w-full max-w-sm bg-white rounded-3xl shadow-2xl overflow-hidden border animate-fade-in-up transition-colors duration-500 ${isSuperAdminMode ? 'border-stone-800' : 'border-rose-100'}`}>
@@ -87,10 +87,10 @@ export const AuthScreen: React.FC = () => {
                 {isSuperAdminMode ? <Lock size={32} /> : <Sparkles size={32} />}
             </div>
             <h1 className="relative z-10 font-serif text-3xl font-bold tracking-wide">
-                {isSuperAdminMode ? 'Super Admin' : 'Lumina'}
+                {isSuperAdminMode ? 'Super Admin' : 'Agenda VIP'}
             </h1>
             <p className="relative z-10 text-xs uppercase tracking-[0.3em] opacity-90 mt-1">
-                {isSuperAdminMode ? 'Acesso Restrito' : 'Studio Manager'}
+                {isSuperAdminMode ? 'Acesso Restrito' : 'Sua Gestão Completa'}
             </p>
         </div>
 
