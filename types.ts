@@ -1,3 +1,4 @@
+
 export interface Professional {
   id: string;
   nome: string;
@@ -10,6 +11,9 @@ export interface Professional {
   linkMaps: string;
   whatsapp: string; // Profissional's phone
   theme?: 'rose' | 'purple' | 'luxury' | 'ocean' | 'peach' | 'slate' | 'forest';
+  status?: 'active' | 'inactive'; 
+  isSuperAdmin?: boolean; 
+  slug?: string; // New field for pretty URL
 }
 
 export interface Service {

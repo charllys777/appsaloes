@@ -25,6 +25,9 @@
             },
             fontFamily: {
               sans: ['Helvetica Neue', 'Arial', 'sans-serif'],
+            },
+            animation: {
+              'scroll': 'scroll 20s linear infinite',
             }
           }
         }
@@ -43,6 +46,15 @@
       .hide-scrollbar {
         -ms-overflow-style: none;
         scrollbar-width: none;
+      }
+      /* Marquee Animation */
+      @keyframes scroll {
+        0% { transform: translateX(0); }
+        100% { transform: translateX(-50%); }
+      }
+      .animate-scroll {
+        animation: scroll 25s linear infinite;
+        width: max-content;
       }
     </style>
   <script type="importmap">

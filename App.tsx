@@ -1,9 +1,10 @@
+
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   User, CalendarDays, Check, Clock,
   Loader2, Lock, LogOut, Trash2, Plus, MapPin,
   Image as ImageIcon, MessageCircle, Home, X, Star, Camera, Palette, 
-  TrendingUp, DollarSign, Award, Quote
+  TrendingUp, DollarSign, Award, Quote, Edit3, ArrowRight, Eye, EyeOff, Ban, Settings
 } from 'lucide-react';
 import { AccordionItem, Input, Button, LoadingScreen, SectionTitle } from './components/Shared'; 
 import { AdminDashboard } from './views/AdminDashboard'; 
@@ -127,9 +128,18 @@ const Carousel: React.FC<{ works: Work[], theme: any }> = ({ works, theme }) => 
   );
 };
 
+interface AppProps {
+  session: any;
+  publicProfileId?: string;
+}
+
 // --- MAIN APP ---
 
-const App: React.FC = () => {
+const App: React.FC<AppProps> = ({ session, publicProfileId }) => {
+  // Determine Mode
+  const isOwner = !!session && !publicProfileId;
+  const userId = publicProfileId || session?.user?.id;
+
   const [professional, setProfessional] = useState<Professional>({ 
     id: '', 
     nome: '', 
@@ -141,19 +151,24 @@ const App: React.FC = () => {
     endereco: '', 
     linkMaps: '', 
     whatsapp: '', 
-    theme: 'rose' 
+    theme: 'rose',
+    status: 'active'
   });
   const [services, setServices] = useState<Service[]>([]);
   const [works, setWorks] = useState<Work[]>([]);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [testimonials, setTestimonials] = useState<Testimonial[]>([]);
 
-  const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
-  const [showLoginModal, setShowLoginModal] = useState(false);
-  const [loginUser, setLoginUser] = useState('');
-  const [loginPass, setLoginPass] = useState('');
+  const [isAdminMode, setIsAdminMode] = useState(false);
+  const [showSecurityModal, setShowSecurityModal] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   
+  // Security Modal State
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(false);
+  const [authError, setAuthError] = useState('');
+  const [verifying, setVerifying] = useState(false);
+
   // Booking State
   const [openSection, setOpenSection] = useState<string | null>(null);
   const [bookingStep, setBookingStep] = useState(0);
@@ -165,9 +180,10 @@ const App: React.FC = () => {
   const theme = THEMES[professional.theme || 'rose'] || THEMES.rose;
 
   const loadData = useCallback(async () => {
+    if (!userId) return;
     setIsLoading(true);
     try {
-      const data = await api.fetchData();
+      const data = await api.fetchData(userId);
       setProfessional(data.professional);
       setServices(data.services);
       setWorks(data.works);
@@ -178,33 +194,57 @@ const App: React.FC = () => {
     } finally {
         setIsLoading(false);
     }
-  }, []);
+  }, [userId]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  // --- HANDLERS ---
+  const apiProxy = useMemo(() => ({
+      ...api,
+      postData: async (action: string, payload: any) => await api.postData(action, payload, userId)
+  }), [userId]);
 
-  const handleLogin = async () => {
-    // 1. Check strict hardcoded 'admin' / 'admin' for fast fallback
-    if (loginUser === 'admin' && loginPass === 'admin') {
-       setIsAdminLoggedIn(true); 
-       setShowLoginModal(false); 
-       loadData();
-       return;
-    }
+  const handleLogout = async () => {
+      await api.signOut();
+      // Force redirect to root to ensure clear state and AuthScreen mount
+      window.location.href = window.location.origin;
+  };
 
-    // 2. Check DB password via API
-    if (loginUser === 'admin') {
-        const isValid = await api.checkAdminPassword(loginPass);
-        if (isValid) {
-            setIsAdminLoggedIn(true); 
-            setShowLoginModal(false); 
-            loadData(); 
-            return;
+  const handleAdminAccess = () => {
+      // Check if "Remember Me" is valid
+      const remembered = localStorage.getItem('admin_remember');
+      if (remembered === userId) {
+          setIsAdminMode(true);
+      } else {
+          setShowSecurityModal(true);
+      }
+  };
+
+  const handleVerifyPassword = async () => {
+      setVerifying(true);
+      setAuthError('');
+      
+      try {
+        if (!session?.user?.email) throw new Error("Erro de sessão");
+        
+        // We verify by trying to sign in again. 
+        // This validates credentials without breaking the flow.
+        const { error } = await api.signIn(session.user.email, confirmPassword);
+        
+        if (error) {
+            setAuthError("Senha incorreta.");
+        } else {
+            if (rememberMe) {
+                localStorage.setItem('admin_remember', userId);
+            }
+            setShowSecurityModal(false);
+            setIsAdminMode(true);
+            setConfirmPassword('');
         }
-    }
-    
-    alert("Usuário ou senha incorretos.");
+      } catch (err) {
+          setAuthError("Erro ao verificar credenciais.");
+      } finally {
+          setVerifying(false);
+      }
   };
 
   const finishBooking = async () => {
@@ -213,7 +253,7 @@ const App: React.FC = () => {
     const total = services.filter(s => selectedServices.includes(s.id)).reduce((acc, s) => acc + s.preco, 0);
 
     try {
-        await api.postData('create_appointment', {
+        await apiProxy.postData('create_appointment', {
             clienteNome: userData.name,
             clienteTelefone: userData.phone,
             servicos: serviceNames,
@@ -222,7 +262,6 @@ const App: React.FC = () => {
             hora: selectedTime
         });
         setBookingStep(3);
-        // Refresh appointments if admin is viewing, or just generally refresh
         loadData();
     } catch (error) {
         alert("Erro ao salvar agendamento. Tente novamente.");
@@ -238,14 +277,35 @@ const App: React.FC = () => {
 
   if (isLoading) return <LoadingScreen />;
 
+  // --- ACCOUNT INACTIVE CHECK ---
+  if (professional.status === 'inactive') {
+      return (
+          <div className="min-h-screen bg-white flex flex-col items-center justify-center p-6 text-center">
+              <div className="w-16 h-16 bg-stone-100 rounded-full flex items-center justify-center mb-6">
+                  <Ban size={32} className="text-stone-400" />
+              </div>
+              <h1 className="text-2xl font-serif font-bold text-stone-800 mb-2">Temporariamente indisponível</h1>
+              <p className="text-sm text-stone-500 max-w-xs leading-relaxed mb-8">
+                  Esta página não está acessível no momento. Entre em contato com o administrador para mais informações.
+              </p>
+              {isOwner && (
+                  <button onClick={handleLogout} className="text-xs font-bold uppercase text-stone-400 hover:text-stone-600 transition-colors">
+                      Sair da conta
+                  </button>
+              )}
+          </div>
+      );
+  }
+
   // --- ADMIN RENDER ---
-  if (isAdminLoggedIn) {
+  if (isAdminMode && isOwner) {
       return (
           <AdminDashboard 
             data={{ professional, services, works, appointments, testimonials, careItems: [] }} 
             onUpdate={loadData} 
-            onLogout={() => setIsAdminLoggedIn(false)}
+            onLogout={() => setIsAdminMode(false)}
             theme={theme}
+            userId={userId} 
           />
       );
   }
@@ -259,6 +319,17 @@ const App: React.FC = () => {
             {professional.fotoPerfil && <img src={professional.fotoPerfil} className="w-full h-full object-cover opacity-60 scale-105 animate-slow-zoom" />}
             <div className={`absolute inset-0 bg-gradient-to-b ${theme.headerGradient}`} />
         </div>
+        
+        {/* Logout Button (Only for Owner) */}
+        {isOwner && (
+            <button 
+                onClick={handleLogout}
+                className="absolute top-4 right-4 z-50 px-3 py-1.5 rounded-full bg-black/30 backdrop-blur-md text-white/90 hover:bg-black/50 transition-all border border-white/20 flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest"
+            >
+                <LogOut size={14} /> Sair
+            </button>
+        )}
+
         <div className="relative z-10 flex flex-col items-center justify-center h-full pb-20 px-4 animate-fade-in-up w-full">
             {professional.logo ? (
                 <div className="w-32 h-32 rounded-full overflow-hidden border-4 border-white shadow-2xl mb-4 ring-2 ring-white/20">
@@ -291,24 +362,50 @@ const App: React.FC = () => {
                      <p className="text-sm leading-7 font-light whitespace-pre-line text-justify" style={{ color: theme.text }}>{professional.bio}</p>
                 </div>
                 
-                {/* Depoimentos Scroll */}
-                <div className="w-full pt-6 border-t" style={{ borderColor: theme.border }}>
-                    <h4 className="text-[10px] font-bold uppercase tracking-widest mb-4" style={{ color: theme.subtext }}>O que dizem sobre mim</h4>
-                    {testimonials.length > 0 ? (
-                        <div className="flex overflow-x-auto gap-4 pb-4 snap-x no-scrollbar">
-                            {testimonials.map(t => (
-                                <div key={t.id} className="snap-center min-w-[220px] p-4 rounded-xl border bg-white/50 relative" style={{ borderColor: theme.border }}>
-                                    <Quote size={16} className="mb-2 opacity-50" style={{ color: theme.accent }} />
-                                    <p className="text-xs italic mb-3 leading-relaxed" style={{ color: theme.text }}>"{t.text}"</p>
-                                    <div className="flex items-center gap-1">
-                                        <div className="flex">{[...Array(t.rating)].map((_, i) => <Star key={i} size={10} fill={theme.accent} stroke="none"/>)}</div>
-                                        <span className="text-[10px] font-bold" style={{ color: theme.text }}>- {t.clientName}</span>
+                {/* Depoimentos Marquee */}
+                {testimonials.length > 0 && (
+                    <div className="w-full pt-8 pb-4 overflow-hidden relative border-t mt-4" style={{ borderColor: theme.border }}>
+                         <div className="absolute left-0 top-8 bottom-0 w-8 z-10 bg-gradient-to-r from-white to-transparent opacity-80" />
+                         <div className="absolute right-0 top-8 bottom-0 w-8 z-10 bg-gradient-to-l from-white to-transparent opacity-80" />
+                         
+                         <h4 className="text-[10px] font-bold uppercase tracking-widest mb-6 text-center" style={{ color: theme.subtext }}>O que dizem sobre mim</h4>
+                         
+                         <div className="flex animate-scroll w-max hover:[animation-play-state:paused]">
+                            {/* Original List */}
+                            <div className="flex gap-4 px-4">
+                                {testimonials.map(t => (
+                                    <div key={t.id} className="w-64 p-5 rounded-xl border relative shadow-sm flex-shrink-0" style={{ backgroundColor: `${theme.bg}`, borderColor: theme.border }}>
+                                        <Quote size={24} className="absolute -top-3 -left-2 fill-current" style={{ color: theme.accent }} />
+                                        <Quote size={24} className="absolute -bottom-3 -right-2 fill-current rotate-180 opacity-30" style={{ color: theme.accent }} />
+                                        
+                                        <p className="text-xs italic mb-4 leading-relaxed font-light mt-2 line-clamp-4" style={{ color: theme.text }}>"{t.text}"</p>
+                                        
+                                        <div className="flex items-center justify-between border-t pt-2" style={{ borderColor: theme.border }}>
+                                            <span className="text-[11px] font-bold uppercase" style={{ color: theme.text }}>{t.clientName}</span>
+                                            <div className="flex">{[...Array(t.rating)].map((_, i) => <Star key={i} size={10} fill={theme.accent} stroke="none"/>)}</div>
+                                        </div>
                                     </div>
-                                </div>
-                            ))}
-                        </div>
-                    ) : <p className="text-xs italic opacity-50">Sem depoimentos ainda.</p>}
-                </div>
+                                ))}
+                            </div>
+                            {/* Duplicate List for seamless loop */}
+                            <div className="flex gap-4 px-4">
+                                {testimonials.map(t => (
+                                    <div key={`dup-${t.id}`} className="w-64 p-5 rounded-xl border relative shadow-sm flex-shrink-0" style={{ backgroundColor: `${theme.bg}`, borderColor: theme.border }}>
+                                        <Quote size={24} className="absolute -top-3 -left-2 fill-current" style={{ color: theme.accent }} />
+                                        <Quote size={24} className="absolute -bottom-3 -right-2 fill-current rotate-180 opacity-30" style={{ color: theme.accent }} />
+                                        
+                                        <p className="text-xs italic mb-4 leading-relaxed font-light mt-2 line-clamp-4" style={{ color: theme.text }}>"{t.text}"</p>
+                                        
+                                        <div className="flex items-center justify-between border-t pt-2" style={{ borderColor: theme.border }}>
+                                            <span className="text-[11px] font-bold uppercase" style={{ color: theme.text }}>{t.clientName}</span>
+                                            <div className="flex">{[...Array(t.rating)].map((_, i) => <Star key={i} size={10} fill={theme.accent} stroke="none"/>)}</div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                         </div>
+                    </div>
+                )}
             </div>
         </AccordionItem>
 
@@ -383,7 +480,15 @@ const App: React.FC = () => {
                         <div className="flex items-center justify-center h-full text-xs" style={{ color: theme.subtext }}>Mapa indisponível</div>
                     )}
                 </div>
-                <a href={professional.linkMaps} target="_blank" className="inline-block text-white px-8 py-3 rounded-xl text-xs font-bold uppercase transition-all shadow-lg" style={{ backgroundColor: theme.button }}>Abrir no Google Maps</a>
+                <a 
+                    href={professional.linkMaps || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(professional.endereco)}`} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="inline-block text-white px-8 py-3 rounded-xl text-xs font-bold uppercase transition-all shadow-lg hover:scale-105 active:scale-95" 
+                    style={{ backgroundColor: theme.button }}
+                >
+                    Abrir no Google Maps
+                </a>
             </div>
         </AccordionItem>
 
@@ -412,18 +517,57 @@ const App: React.FC = () => {
             <h3 className="text-[10px] uppercase tracking-[0.3em] mb-6" style={{ color: theme.subtext }}>Portfólio</h3>
             <Carousel works={works} theme={theme} />
         </div>
-        <div className="flex justify-center">
-            <button onClick={() => setShowLoginModal(true)} className="flex items-center gap-2 text-[9px] uppercase tracking-widest transition-colors border px-4 py-2 rounded-full" style={{ color: theme.subtext, borderColor: theme.border }}><Lock size={10}/> Área Restrita</button>
-        </div>
+        
+        {/* BUTTON: ACESSAR PAINEL ADMIN (Only for Owner) */}
+        {isOwner && (
+            <div className="flex justify-center mt-8 px-4">
+                <button 
+                    onClick={handleAdminAccess} 
+                    className="w-full max-w-xs flex items-center justify-center gap-3 bg-stone-900 text-white px-6 py-4 rounded-2xl shadow-xl hover:bg-black transition-all transform hover:scale-[1.02] active:scale-95"
+                >
+                    <Settings size={18} className="text-stone-400" />
+                    <span className="text-xs font-bold uppercase tracking-widest">Acessar Painel Admin</span>
+                </button>
+            </div>
+        )}
       </footer>
 
-      <Modal isOpen={showLoginModal} onClose={() => setShowLoginModal(false)} title="Área Restrita" theme={theme}>
-        <div className="space-y-4 py-2">
-            <div><label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: theme.subtext }}>Usuário</label><input className="w-full p-4 border rounded-2xl text-sm mt-2 outline-none" style={{ borderColor: theme.border, backgroundColor: theme.bg, color: theme.text }} placeholder="admin" value={loginUser} onChange={e => setLoginUser(e.target.value)} /></div>
-            <div><label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: theme.subtext }}>Senha</label><input className="w-full p-4 border rounded-2xl text-sm mt-2 outline-none" style={{ borderColor: theme.border, backgroundColor: theme.bg, color: theme.text }} type="password" placeholder="••••" value={loginPass} onChange={e => setLoginPass(e.target.value)} /></div>
-            <button onClick={handleLogin} className="w-full text-white py-4 rounded-2xl font-bold text-xs uppercase transition-colors shadow-lg" style={{ backgroundColor: theme.button }}>Entrar</button>
-        </div>
+      {/* Security Modal for Admin Access */}
+      <Modal isOpen={showSecurityModal} onClose={() => setShowSecurityModal(false)} title="Segurança" theme={theme}>
+          <div className="space-y-4 pt-2">
+              <div className="flex flex-col items-center justify-center mb-4 text-center">
+                  <div className="w-12 h-12 bg-rose-50 rounded-full flex items-center justify-center mb-2">
+                      <Lock size={20} className="text-rose-400" />
+                  </div>
+                  <p className="text-xs text-stone-500">Confirme sua senha para acessar o painel.</p>
+              </div>
+              
+              <div className="space-y-3">
+                  <Input 
+                    type="password" 
+                    label="Sua Senha" 
+                    placeholder="••••••••" 
+                    value={confirmPassword} 
+                    onChange={e => setConfirmPassword(e.target.value)}
+                  />
+                  
+                  <label className="flex items-center gap-2 cursor-pointer">
+                      <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${rememberMe ? 'bg-rose-400 border-rose-400' : 'border-stone-300'}`}>
+                          {rememberMe && <Check size={10} className="text-white" />}
+                      </div>
+                      <input type="checkbox" className="hidden" checked={rememberMe} onChange={() => setRememberMe(!rememberMe)} />
+                      <span className="text-xs text-stone-500 select-none">Lembrar-me neste dispositivo</span>
+                  </label>
+              </div>
+
+              {authError && <p className="text-xs text-red-500 text-center bg-red-50 p-2 rounded-lg">{authError}</p>}
+
+              <Button onClick={handleVerifyPassword} disabled={!confirmPassword || verifying} className="w-full mt-2">
+                  {verifying ? 'Verificando...' : 'Acessar Painel'}
+              </Button>
+          </div>
       </Modal>
+
     </div>
   );
 };

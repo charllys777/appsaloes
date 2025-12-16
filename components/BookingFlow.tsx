@@ -8,9 +8,10 @@ interface BookingFlowProps {
   services: Service[];
   professional: Professional;
   onClose: () => void;
+  userId: string;
 }
 
-export const BookingFlow: React.FC<BookingFlowProps> = ({ services, professional, onClose }) => {
+export const BookingFlow: React.FC<BookingFlowProps> = ({ services, professional, onClose, userId }) => {
   const [step, setStep] = useState(1);
   const [selectedServices, setSelectedServices] = useState<string[]>([]);
   const [clientName, setClientName] = useState('');
@@ -71,7 +72,7 @@ export const BookingFlow: React.FC<BookingFlowProps> = ({ services, professional
 
     try {
       // 1. Send to API
-      await api.postData('create_appointment', appointmentData);
+      await api.postData('create_appointment', appointmentData, userId);
 
       // 2. WhatsApp Redirect
       const message = `Olá! Gostaria de confirmar meu agendamento:%0A%0A*Nome:* ${clientName}%0A*Data:* ${date.split('-').reverse().join('/')} às ${time}%0A*Serviços:* ${serviceNames.join(', ')}%0A*Total:* ${formatBRL(total)}`;
