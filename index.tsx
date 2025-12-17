@@ -20,35 +20,51 @@ const Root = () => {
 
   useEffect(() => {
     // If public mode, don't run auth checks
-    if (publicUserId) return;
+    if (publicUserId) {
+        setIsLoading(false);
+        return;
+    }
 
     let isMounted = true;
 
-    // 1. Setup Auth Listener
-    const { data: { subscription } } = api.onAuthStateChange(async (_event, session) => {
-      if (!isMounted) return;
+    // Helper to process session state cleanly
+    const handleSessionCheck = async (currentSession: any) => {
+        if (!isMounted) return;
+        
+        setSession(currentSession);
 
-      setSession(session);
+        if (currentSession?.user) {
+            // Check Admin Privileges with a timeout to prevent hanging
+            try {
+               const checkAdminPromise = api.isSuperAdmin(currentSession.user.id, currentSession.user.email);
+               // Timeout after 3 seconds, default to false
+               const timeoutPromise = new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 3000));
+               
+               const isAdmin = await Promise.race([checkAdminPromise, timeoutPromise]);
+               
+               if (isMounted) setIsSuperAdmin(isAdmin);
+            } catch (e) {
+               if (isMounted) setIsSuperAdmin(false);
+            }
+        } else {
+            if (isMounted) setIsSuperAdmin(false);
+        }
 
-      if (session?.user) {
-          // Wrap Admin check in a timeout promise so it doesn't hang forever
-          try {
-             const checkAdminPromise = api.isSuperAdmin(session.user.id, session.user.email);
-             // Timeout after 3 seconds, default to false
-             const timeoutPromise = new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 3000));
-             
-             const isAdmin = await Promise.race([checkAdminPromise, timeoutPromise]);
-             
-             if (isMounted) setIsSuperAdmin(isAdmin);
-          } catch (e) {
-             console.warn("Admin check skipped due to error/timeout");
-             if (isMounted) setIsSuperAdmin(false);
-          }
-      } else {
-          if (isMounted) setIsSuperAdmin(false);
-      }
+        // IMPORTANT: Always stop loading after the check
+        if (isMounted) setIsLoading(false);
+    };
 
-      if (isMounted) setIsLoading(false);
+    // 1. Check Session Immediately (Fixes infinite loading on Login Screen)
+    api.getSession().then(({ data: { session } }) => {
+        handleSessionCheck(session);
+    }).catch(() => {
+        // Even if error, stop loading so user sees AuthScreen
+        if (isMounted) setIsLoading(false);
+    });
+
+    // 2. Setup Auth Listener for subsequent changes (Login/Logout)
+    const { data: { subscription } } = api.onAuthStateChange((_event, session) => {
+        handleSessionCheck(session);
     });
 
     return () => {
