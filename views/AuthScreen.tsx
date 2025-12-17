@@ -24,7 +24,8 @@ export const AuthScreen: React.FC = () => {
       if (isLogin) {
         const { data, error } = await api.signIn(cleanEmail, password);
         if (error) throw error;
-        // Session update in index.tsx handles redirect
+        // Success! Reload to ensure the Session Listener in index.tsx picks up the session properly
+        window.location.reload();
       } else {
         // Normal User Signup
         const { data, error } = await api.signUp(cleanEmail, password);
@@ -32,6 +33,7 @@ export const AuthScreen: React.FC = () => {
         
         if (data.session) {
            setMessage({ type: 'success', text: 'Conta criada e logada com sucesso!' });
+           setTimeout(() => window.location.reload(), 1000);
         } else {
            setMessage({ type: 'success', text: 'Cadastro realizado! Verifique seu e-mail para confirmar a conta antes de entrar.' });
            setIsLogin(true);
@@ -40,8 +42,10 @@ export const AuthScreen: React.FC = () => {
     } catch (error: any) {
       console.error("Auth Error:", error);
       let errorMsg = error.message;
-      if (errorMsg === 'Invalid login credentials') errorMsg = 'E-mail ou senha incorretos.';
+      if (errorMsg.includes('Invalid login credentials')) errorMsg = 'E-mail ou senha incorretos. Se não tem conta, clique em Cadastrar.';
+      if (errorMsg.includes('Email not confirmed')) errorMsg = 'E-mail não confirmado. Verifique sua caixa de entrada (e spam) antes de logar.';
       if (errorMsg === 'User already registered') errorMsg = 'Este e-mail já está cadastrado.';
+      
       setMessage({ type: 'error', text: errorMsg || 'Erro ao processar solicitação.' });
     } finally {
       setIsLoading(false);

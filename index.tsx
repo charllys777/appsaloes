@@ -6,62 +6,59 @@ import { AuthScreen } from './views/AuthScreen';
 import { SuperAdminDashboard } from './views/SuperAdminDashboard';
 import { api } from './services/api';
 import { LoadingScreen } from './components/Shared';
+import { WifiOff } from 'lucide-react';
 
 const Root = () => {
   const [session, setSession] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
-  const [publicUserId, setPublicUserId] = useState<string | null>(null);
+  const [connectionError, setConnectionError] = useState(false);
+  
+  // Initialize publicUserId directly from URL
+  const [publicUserId, setPublicUserId] = useState<string | null>(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('u');
+  });
 
   useEffect(() => {
     let isMounted = true;
     
-    // Failsafe: Force loading to stop after 5 seconds if something hangs
-    const safetyTimer = setTimeout(() => {
-        if (isMounted && isLoading) setIsLoading(false);
-    }, 5000);
+    if (publicUserId) {
+        setIsLoading(false);
+        return;
+    }
 
     const initApp = async () => {
         try {
-            // 1. Check for Public URL param (?u=USER_ID)
-            const params = new URLSearchParams(window.location.search);
-            const uid = params.get('u');
-
-            if (uid) {
-                if (isMounted) setPublicUserId(uid);
-                // We don't need to check session if viewing a public profile
-                return; 
-            }
-
-            // 2. Check Session
-            const { data } = await api.getSession();
-            const currentSession = data?.session;
+            const { data, error } = await api.getSession();
+            if (error) throw error;
             
+            const currentSession = data?.session;
             if (isMounted) setSession(currentSession);
 
             if (currentSession?.user) {
-                // Check Super Admin Permission
+                // Defensive: If this check fails, user just sees normal dashboard, not a crash
                 try {
                     const isAdmin = await api.isSuperAdmin(currentSession.user.id, currentSession.user.email);
                     if (isMounted) setIsSuperAdmin(isAdmin);
                 } catch (e) {
-                    console.error("Error checking permissions", e);
-                    if (isMounted) setIsSuperAdmin(false);
+                    console.warn("Admin check failed", e);
                 }
             }
-        } catch (error) {
+        } catch (error: any) {
             console.error("Initialization error:", error);
+            if (error.message?.includes("fetch")) {
+                setConnectionError(true);
+            }
         } finally {
-            // CRITICAL: Always turn off loading, even if errors occur
             if (isMounted) setIsLoading(false);
-            clearTimeout(safetyTimer);
         }
     };
 
     initApp();
 
     const { data: { subscription } } = api.onAuthStateChange(async (_event, session) => {
-      if (isMounted) {
+      if (isMounted && !publicUserId) {
           setSession(session);
           if (session?.user) {
               try {
@@ -76,41 +73,37 @@ const Root = () => {
 
     return () => {
         isMounted = false;
-        clearTimeout(safetyTimer);
         subscription.unsubscribe();
     };
-  }, []);
+  }, [publicUserId]);
 
   const handleLogout = async () => {
-      try {
-        await api.signOut();
-      } catch (e) {
-        console.error("Logout error", e);
-      }
-      // Simply clear state to show AuthScreen without forcing a URL redirect (avoids 404)
+      await api.signOut();
       setSession(null);
       setIsSuperAdmin(false);
       setPublicUserId(null);
+      window.history.pushState({}, '', window.location.pathname);
   };
+
+  if (connectionError) {
+      return (
+          <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-stone-50 text-center">
+              <WifiOff size={48} className="text-stone-300 mb-4" />
+              <h1 className="text-xl font-bold text-stone-800 mb-2">Erro de Conexão</h1>
+              <p className="text-stone-500 mb-6">Não foi possível conectar ao servidor. Verifique sua internet ou se o serviço está disponível.</p>
+              <button onClick={() => window.location.reload()} className="px-6 py-3 bg-stone-800 text-white rounded-xl">Tentar Novamente</button>
+          </div>
+      );
+  }
 
   if (isLoading) return <LoadingScreen />;
 
-  // Scenario A: Super Admin Login
-  if (isSuperAdmin) {
-      return <SuperAdminDashboard onLogout={handleLogout} />;
-  }
+  if (publicUserId) return <App session={null} publicProfileId={publicUserId} />;
 
-  // Scenario B: Client viewing a shared agenda link
-  if (publicUserId) {
-    return <App session={null} publicProfileId={publicUserId} />;
-  }
+  if (isSuperAdmin) return <SuperAdminDashboard onLogout={handleLogout} />;
 
-  // Scenario C: Owner not logged in -> Show Auth Screen
-  if (!session) {
-    return <AuthScreen />;
-  }
+  if (!session) return <AuthScreen />;
 
-  // Scenario D: Owner logged in -> Show App in "Preview/Admin" mode
   return <App session={session} />;
 };
 

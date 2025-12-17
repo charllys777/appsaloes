@@ -4,7 +4,7 @@ import {
   User, CalendarDays, Check, Clock,
   Loader2, Lock, LogOut, Trash2, Plus, MapPin,
   Image as ImageIcon, MessageCircle, Home, X, Star, Camera, Palette, 
-  TrendingUp, DollarSign, Award, Quote, Edit3, ArrowRight, Eye, EyeOff, Ban, Settings
+  TrendingUp, DollarSign, Award, Quote, Edit3, ArrowRight, Eye, EyeOff, Ban, Settings, SearchX
 } from 'lucide-react';
 import { AccordionItem, Input, Button, LoadingScreen, SectionTitle } from './components/Shared'; 
 import { AdminDashboard } from './views/AdminDashboard'; 
@@ -137,6 +137,7 @@ interface AppProps {
 const App: React.FC<AppProps> = ({ session, publicProfileId }) => {
   // Determine Mode
   const isOwner = !!session && !publicProfileId;
+  const isPublicMode = !!publicProfileId;
   const userId = publicProfileId || session?.user?.id;
 
   const [professional, setProfessional] = useState<Professional>({ 
@@ -210,16 +211,14 @@ const App: React.FC<AppProps> = ({ session, publicProfileId }) => {
   }), [userId]);
 
   const handleLogout = async () => {
+      // Logic handled in index.tsx via onAuthStateChange or directly
+      // This is just a trigger
       try {
         await api.signOut();
-      } catch (e) {
-          console.error(e);
-      }
-      // No forced redirect here. The state change in index.tsx via onAuthStateChange will handle the UI switch.
+      } catch (e) { console.error(e); }
   };
 
   const handleAdminAccess = () => {
-      // Check if "Remember Me" is valid
       const remembered = localStorage.getItem('admin_remember');
       if (remembered === userId) {
           setIsAdminMode(true);
@@ -231,20 +230,13 @@ const App: React.FC<AppProps> = ({ session, publicProfileId }) => {
   const handleVerifyPassword = async () => {
       setVerifying(true);
       setAuthError('');
-      
       try {
         if (!session?.user?.email) throw new Error("Erro de sessão");
-        
-        // We verify by trying to sign in again. 
-        // This validates credentials without breaking the flow.
         const { error } = await api.signIn(session.user.email, confirmPassword);
-        
         if (error) {
             setAuthError("Senha incorreta.");
         } else {
-            if (rememberMe) {
-                localStorage.setItem('admin_remember', userId);
-            }
+            if (rememberMe) localStorage.setItem('admin_remember', userId);
             setShowSecurityModal(false);
             setIsAdminMode(true);
             setConfirmPassword('');
@@ -259,7 +251,6 @@ const App: React.FC<AppProps> = ({ session, publicProfileId }) => {
   const finishBooking = async () => {
     if (!selectedDay || !selectedTime) return;
     const serviceNames = services.filter(s => selectedServices.includes(s.id)).map(s => s.nome);
-    const total = services.filter(s => selectedServices.includes(s.id)).reduce((acc, s) => acc + s.preco, 0);
 
     try {
         await apiProxy.postData('create_appointment', {
@@ -284,26 +275,35 @@ const App: React.FC<AppProps> = ({ session, publicProfileId }) => {
     window.open(`https://wa.me/55${professional.whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`, '_blank');
   };
 
-  // --- Dynamic Time Calculation ---
   const getAvailableTimesForDay = (day: DaySlot) => {
-    // 1. Get Configured Hours for this weekday
     const configuredHours = professional.workHours?.[day.weekday] || [];
-    
-    // 2. Filter out Booked Hours
-    // The issue was string comparison. 
-    // day.date is "DD/MM" (e.g., "06/10")
-    // appointment.data (from API view) usually comes as "DD/MM (WeekDay)" e.g. "06/10 (Dom)"
-    // We need to check if appointment.data contains the date.
-    
     const bookedTimes = appointments
         .filter(apt => apt.data && apt.data.includes(day.date))
         .map(apt => apt.hora);
-        
     return configuredHours.filter(time => !bookedTimes.includes(time));
   };
 
 
   if (isLoading) return <LoadingScreen />;
+
+  // --- NOT FOUND CHECK ---
+  // If we are in public mode, but the professional ID returned is "temp" (default), it means the user wasn't found in DB.
+  if (isPublicMode && professional.id === 'temp') {
+      return (
+        <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-stone-50 text-stone-600">
+            <div className="w-20 h-20 bg-stone-200 rounded-full flex items-center justify-center mb-6">
+                <SearchX size={40} className="text-stone-400" />
+            </div>
+            <h1 className="text-xl font-bold mb-2 text-stone-800">Página não encontrada</h1>
+            <p className="text-sm text-center max-w-xs mb-8">
+                O link que você acessou não corresponde a nenhum estúdio ativo. Verifique o endereço e tente novamente.
+            </p>
+            <a href="/" className="text-xs font-bold uppercase text-rose-500 hover:underline">
+                Voltar ao Início
+            </a>
+        </div>
+      );
+  }
 
   // --- ACCOUNT INACTIVE CHECK ---
   if (professional.status === 'inactive') {
@@ -338,7 +338,7 @@ const App: React.FC<AppProps> = ({ session, publicProfileId }) => {
       );
   }
 
-  // --- PUBLIC RENDER ---
+  // --- PUBLIC RENDER (CLONE OF INITIAL PAGE) ---
   return (
     <div className="min-h-screen font-sans pb-10 transition-colors duration-500" style={{ backgroundColor: theme.bg, color: theme.text }}>
       {/* Header */}
@@ -348,7 +348,7 @@ const App: React.FC<AppProps> = ({ session, publicProfileId }) => {
             <div className={`absolute inset-0 bg-gradient-to-b ${theme.headerGradient}`} />
         </div>
         
-        {/* Logout Button (Only for Owner) */}
+        {/* Logout Button (ONLY FOR OWNER) */}
         {isOwner && (
             <button 
                 onClick={handleLogout}
@@ -399,15 +399,12 @@ const App: React.FC<AppProps> = ({ session, publicProfileId }) => {
                          <h4 className="text-[10px] font-bold uppercase tracking-widest mb-6 text-center" style={{ color: theme.subtext }}>O que dizem sobre mim</h4>
                          
                          <div className="flex animate-scroll w-max hover:[animation-play-state:paused]">
-                            {/* Original List */}
                             <div className="flex gap-4 px-4">
                                 {testimonials.map(t => (
                                     <div key={t.id} className="w-64 p-5 rounded-xl border relative shadow-sm flex-shrink-0" style={{ backgroundColor: `${theme.bg}`, borderColor: theme.border }}>
                                         <Quote size={24} className="absolute -top-3 -left-2 fill-current" style={{ color: theme.accent }} />
                                         <Quote size={24} className="absolute -bottom-3 -right-2 fill-current rotate-180 opacity-30" style={{ color: theme.accent }} />
-                                        
                                         <p className="text-xs italic mb-4 leading-relaxed font-light mt-2 line-clamp-4" style={{ color: theme.text }}>"{t.text}"</p>
-                                        
                                         <div className="flex items-center justify-between border-t pt-2" style={{ borderColor: theme.border }}>
                                             <span className="text-[11px] font-bold uppercase" style={{ color: theme.text }}>{t.clientName}</span>
                                             <div className="flex">{[...Array(t.rating)].map((_, i) => <Star key={i} size={10} fill={theme.accent} stroke="none"/>)}</div>
@@ -415,15 +412,12 @@ const App: React.FC<AppProps> = ({ session, publicProfileId }) => {
                                     </div>
                                 ))}
                             </div>
-                            {/* Duplicate List for seamless loop */}
                             <div className="flex gap-4 px-4">
                                 {testimonials.map(t => (
                                     <div key={`dup-${t.id}`} className="w-64 p-5 rounded-xl border relative shadow-sm flex-shrink-0" style={{ backgroundColor: `${theme.bg}`, borderColor: theme.border }}>
                                         <Quote size={24} className="absolute -top-3 -left-2 fill-current" style={{ color: theme.accent }} />
                                         <Quote size={24} className="absolute -bottom-3 -right-2 fill-current rotate-180 opacity-30" style={{ color: theme.accent }} />
-                                        
                                         <p className="text-xs italic mb-4 leading-relaxed font-light mt-2 line-clamp-4" style={{ color: theme.text }}>"{t.text}"</p>
-                                        
                                         <div className="flex items-center justify-between border-t pt-2" style={{ borderColor: theme.border }}>
                                             <span className="text-[11px] font-bold uppercase" style={{ color: theme.text }}>{t.clientName}</span>
                                             <div className="flex">{[...Array(t.rating)].map((_, i) => <Star key={i} size={10} fill={theme.accent} stroke="none"/>)}</div>
@@ -464,14 +458,9 @@ const App: React.FC<AppProps> = ({ session, publicProfileId }) => {
                 <div className="space-y-5 animate-fade-in">
                     <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
                         {NEXT_DAYS.map((day, idx) => {
-                            // Only show days that have configured hours
                             const availableTimes = getAvailableTimesForDay(day);
-                            const hasTimes = availableTimes.length > 0;
                             const isConfiguredOpen = (professional.workHours?.[day.weekday] || []).length > 0;
                             
-                            // If day is configured open but all slots taken, we still show it but full
-                            // If day is NOT configured open, we hide it or show disabled.
-                            // Let's hide closed days for cleaner UI.
                             if (!isConfiguredOpen) return null;
 
                             return (
@@ -563,7 +552,7 @@ const App: React.FC<AppProps> = ({ session, publicProfileId }) => {
             <Carousel works={works} theme={theme} />
         </div>
         
-        {/* BUTTON: ACESSAR PAINEL ADMIN (Only for Owner) */}
+        {/* BUTTON: ACESSAR PAINEL ADMIN (ONLY FOR OWNER) */}
         {isOwner && (
             <div className="flex justify-center mt-8 px-4">
                 <button 
