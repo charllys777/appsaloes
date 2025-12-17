@@ -8,50 +8,46 @@ import { api } from './services/api';
 import { LoadingScreen } from './components/Shared';
 
 const Root = () => {
+  // Get URL param immediately
+  const searchParams = new URLSearchParams(window.location.search);
+  const urlPublicId = searchParams.get('u');
+
+  // If public ID exists, we are NOT loading. We render App immediately.
+  const [isLoading, setIsLoading] = useState(!urlPublicId);
   const [session, setSession] = useState<any>(null);
-  const [isLoading, setIsLoading] = useState(true);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
-  
-  // Initialize publicUserId directly from URL
-  const [publicUserId, setPublicUserId] = useState<string | null>(() => {
-    const params = new URLSearchParams(window.location.search);
-    return params.get('u');
-  });
+  const [publicUserId, setPublicUserId] = useState<string | null>(urlPublicId);
 
   useEffect(() => {
+    // If public mode, don't run auth checks
+    if (publicUserId) return;
+
     let isMounted = true;
-    
-    // If viewing a public profile, we don't need to wait for auth
-    if (publicUserId) {
-        setIsLoading(false);
-        return;
-    }
 
-    // 1. Get initial session immediately (Optimistic UI)
-    api.getSession().then(({ data: { session } }) => {
-        if (isMounted && session) setSession(session);
-    });
-
-    // 2. Listen for Auth Changes (The Source of Truth)
+    // 1. Setup Auth Listener
     const { data: { subscription } } = api.onAuthStateChange(async (_event, session) => {
       if (!isMounted) return;
 
       setSession(session);
 
       if (session?.user) {
+          // Wrap Admin check in a timeout promise so it doesn't hang forever
           try {
-            // Check Admin Privileges
-            const isAdmin = await api.isSuperAdmin(session.user.id, session.user.email);
-            if (isMounted) setIsSuperAdmin(isAdmin);
+             const checkAdminPromise = api.isSuperAdmin(session.user.id, session.user.email);
+             // Timeout after 3 seconds, default to false
+             const timeoutPromise = new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 3000));
+             
+             const isAdmin = await Promise.race([checkAdminPromise, timeoutPromise]);
+             
+             if (isMounted) setIsSuperAdmin(isAdmin);
           } catch (e) {
-             console.warn("Admin check failed, defaulting to false", e);
+             console.warn("Admin check skipped due to error/timeout");
              if (isMounted) setIsSuperAdmin(false);
           }
       } else {
           if (isMounted) setIsSuperAdmin(false);
       }
 
-      // Always stop loading after auth check is done
       if (isMounted) setIsLoading(false);
     });
 
@@ -63,11 +59,19 @@ const Root = () => {
 
   const handleLogout = async () => {
       setIsLoading(true);
-      await api.signOut();
+      try {
+        await api.signOut();
+      } catch(e) { console.error(e); }
+      
       setSession(null);
       setIsSuperAdmin(false);
       setPublicUserId(null);
-      window.history.pushState({}, '', window.location.pathname);
+      
+      // Clean URL without reloading page
+      const url = new URL(window.location.href);
+      url.searchParams.delete('u');
+      window.history.pushState({}, '', url);
+      
       setIsLoading(false);
   };
 

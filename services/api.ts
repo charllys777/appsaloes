@@ -64,12 +64,9 @@ export const api = {
   isSuperAdmin: async (userId: string, userEmail?: string): Promise<boolean> => {
       // 1. Whitelist Check (Priority)
       if (userEmail && ADMIN_WHITELIST.some(email => email.toLowerCase() === userEmail.toLowerCase())) {
-        // Self-Healing: Ensure DB reflects this permission
         try {
             const { data, error } = await supabase.from('profile').select('id, is_super_admin').eq('user_id', userId).maybeSingle();
             
-            // If connection fails here, we still return TRUE because they are whitelisted in code.
-            // We just log the error and move on.
             if (!error) {
                 if (!data) {
                     await supabase.from('profile').insert({
@@ -89,7 +86,6 @@ export const api = {
         return true;
       }
 
-      // 2. Database Check (For admins created via dashboard)
       try {
         const { data, error } = await supabase.from('profile').select('is_super_admin').eq('user_id', userId).single();
         if (error || !data) return false;
@@ -119,20 +115,17 @@ export const api = {
   },
 
   createSuperAdminUser: async (email: string, password: string, name: string) => {
-      // 1. Create Auth User
       const { data: authData, error: authError } = await supabase.auth.signUp({ 
           email, password, options: { data: { display_name: name } }
       });
       if (authError) throw authError;
       if (!authData.user) throw new Error("Erro ao criar usuário.");
 
-      // 2. Insert Profile as Admin immediately
       const { error: profileError } = await supabase.from('profile').insert({
           user_id: authData.user.id, name: name, is_super_admin: true, status: 'active', work_hours: DEFAULT_HOURS
       });
 
       if (profileError) {
-          // If insert fails (maybe trigger collision), try update
           await supabase.from('profile').update({ is_super_admin: true }).eq('user_id', authData.user.id);
       }
       return authData;
@@ -140,7 +133,7 @@ export const api = {
 
   // --- DATA FETCHING ---
   fetchData: async (userIdOrSlug?: string): Promise<AppData> => {
-    // If asking for the default 'novo-estudio', return default data immediately (Preview Mode)
+    // Immediate return for preview
     if (userIdOrSlug === 'novo-estudio') {
          return { professional: { ...DEFAULT_PROFILE, id: 'temp' }, services: [], works: [], appointments: [], careItems: [], testimonials: [] };
     }
@@ -151,26 +144,23 @@ export const api = {
       let userId = userIdOrSlug;
       let profileData = null;
 
-      // UUID Regex
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userIdOrSlug);
 
       if (isUuid) {
           const { data } = await supabase.from('profile').select('*').eq('user_id', userIdOrSlug).maybeSingle();
           profileData = data;
       } else {
-          // It's a slug, fetch by slug to find UUID
           const { data } = await supabase.from('profile').select('*').eq('slug', userIdOrSlug).maybeSingle();
           if (data) {
               profileData = data;
               userId = data.user_id; 
           } else {
-               // Slug not found
+               // NOT FOUND - Return safe defaults so UI handles it gracefully
                console.warn("Slug not found:", userIdOrSlug);
                return { professional: { ...DEFAULT_PROFILE, id: 'temp' }, services: [], works: [], appointments: [], careItems: [], testimonials: [] };
           }
       }
 
-      // If we have a UUID but no profile row yet (first login), return defaults so they can "Create" via dashboard save
       if (!profileData && isUuid) {
           return { professional: { ...DEFAULT_PROFILE, id: userId }, services: [], works: [], appointments: [], careItems: [], testimonials: [] };
       }
@@ -181,7 +171,6 @@ export const api = {
 
       const targetId = profileData.user_id;
 
-      // Load related data
       const [servicesRes, worksRes, aptRes, testRes] = await Promise.all([
           supabase.from('services').select('*').eq('user_id', targetId).order('id'),
           supabase.from('works').select('*').eq('user_id', targetId).order('created_at', { ascending: false }),
@@ -189,8 +178,6 @@ export const api = {
           supabase.from('testimonials').select('*').eq('user_id', targetId)
       ]);
 
-      // --- MAPPERS (Safely convert DB snake_case to App camelCase) ---
-      
       const services = (servicesRes.data || []).map((s: any) => ({
         id: s.id.toString(),
         nome: s.name,
@@ -201,7 +188,7 @@ export const api = {
 
       const works = (worksRes.data || []).map((w: any) => ({
         id: w.id.toString(),
-        urlImagem: w.image_url || w.image_before_url, // Fallback
+        urlImagem: w.image_url || w.image_before_url,
         imageBeforeUrl: w.image_before_url,
         imageAfterUrl: w.image_after_url,
         titulo: w.title
@@ -253,8 +240,9 @@ export const api = {
       };
 
     } catch (e) {
-      console.error("Fetch Data Error", e);
-      throw e; 
+      console.error("API FETCH ERROR (Swallowed to prevent crash):", e);
+      // Return defaults on error so app doesn't white screen
+      return { professional: DEFAULT_PROFILE, services: [], works: [], appointments: [], careItems: [], testimonials: [] };
     }
   },
 
@@ -282,7 +270,6 @@ export const api = {
         }
         case 'update_services': {
              const services = payload as Service[];
-             
              for (const s of services) {
                  const dbPayload = {
                      user_id: userId,
@@ -291,14 +278,12 @@ export const api = {
                      duration_minutes: parseInt(s.duracao) || 30,
                      post_care: s.postCare
                  };
-                 
                  if (s.id.startsWith('temp_')) {
                      await supabase.from('services').insert(dbPayload);
                  } else {
                      await supabase.from('services').update(dbPayload).eq('id', s.id).eq('user_id', userId);
                  }
              }
-             // Optional: Handle deletion logic here or via separate endpoint as currently implemented in UI
              break;
         }
         case 'update_works': {
