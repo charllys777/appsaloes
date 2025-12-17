@@ -288,7 +288,8 @@ const App: React.FC<AppProps> = ({ session, publicProfileId }) => {
 
   // --- NOT FOUND CHECK ---
   // If we are in public mode, but the professional ID returned is "temp" (default), it means the user wasn't found in DB.
-  if (isPublicMode && professional.id === 'temp') {
+  // EXCEPTION: If the slug is 'novo-estudio', we allow it as a preview/demo.
+  if (isPublicMode && professional.id === 'temp' && publicProfileId !== 'novo-estudio') {
       return (
         <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-stone-50 text-stone-600">
             <div className="w-20 h-20 bg-stone-200 rounded-full flex items-center justify-center mb-6">

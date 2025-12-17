@@ -24,16 +24,15 @@ export const AuthScreen: React.FC = () => {
       if (isLogin) {
         const { data, error } = await api.signIn(cleanEmail, password);
         if (error) throw error;
-        // Success! Reload to ensure the Session Listener in index.tsx picks up the session properly
-        window.location.reload();
+        // No reload needed. index.tsx listener will pick up the change automatically.
       } else {
         // Normal User Signup
         const { data, error } = await api.signUp(cleanEmail, password);
         if (error) throw error;
         
         if (data.session) {
-           setMessage({ type: 'success', text: 'Conta criada e logada com sucesso!' });
-           setTimeout(() => window.location.reload(), 1000);
+           setMessage({ type: 'success', text: 'Conta criada! Entrando...' });
+           // No reload needed.
         } else {
            setMessage({ type: 'success', text: 'Cadastro realizado! Verifique seu e-mail para confirmar a conta antes de entrar.' });
            setIsLogin(true);
@@ -47,17 +46,14 @@ export const AuthScreen: React.FC = () => {
       if (errorMsg === 'User already registered') errorMsg = 'Este e-mail já está cadastrado.';
       
       setMessage({ type: 'error', text: errorMsg || 'Erro ao processar solicitação.' });
-    } finally {
-      setIsLoading(false);
+      setIsLoading(false); // Only stop loading on error. On success, the main App unmounts this component.
     }
   };
 
   const toggleMode = () => {
-      // Just visual toggle now, functionally it's the same login form
       setIsSuperAdminMode(!isSuperAdminMode);
       setIsLogin(true); 
       setMessage(null);
-      // Auto-fill removed to allow typing other admin emails
       setEmail(''); 
       setPassword('');
   };

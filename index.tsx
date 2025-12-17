@@ -6,13 +6,11 @@ import { AuthScreen } from './views/AuthScreen';
 import { SuperAdminDashboard } from './views/SuperAdminDashboard';
 import { api } from './services/api';
 import { LoadingScreen } from './components/Shared';
-import { WifiOff } from 'lucide-react';
 
 const Root = () => {
   const [session, setSession] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
-  const [connectionError, setConnectionError] = useState(false);
   
   // Initialize publicUserId directly from URL
   const [publicUserId, setPublicUserId] = useState<string | null>(() => {
@@ -23,52 +21,38 @@ const Root = () => {
   useEffect(() => {
     let isMounted = true;
     
+    // If viewing a public profile, we don't need to wait for auth
     if (publicUserId) {
         setIsLoading(false);
         return;
     }
 
-    const initApp = async () => {
-        try {
-            const { data, error } = await api.getSession();
-            if (error) throw error;
-            
-            const currentSession = data?.session;
-            if (isMounted) setSession(currentSession);
+    // 1. Get initial session immediately (Optimistic UI)
+    api.getSession().then(({ data: { session } }) => {
+        if (isMounted && session) setSession(session);
+    });
 
-            if (currentSession?.user) {
-                // Defensive: If this check fails, user just sees normal dashboard, not a crash
-                try {
-                    const isAdmin = await api.isSuperAdmin(currentSession.user.id, currentSession.user.email);
-                    if (isMounted) setIsSuperAdmin(isAdmin);
-                } catch (e) {
-                    console.warn("Admin check failed", e);
-                }
-            }
-        } catch (error: any) {
-            console.error("Initialization error:", error);
-            if (error.message?.includes("fetch")) {
-                setConnectionError(true);
-            }
-        } finally {
-            if (isMounted) setIsLoading(false);
-        }
-    };
-
-    initApp();
-
+    // 2. Listen for Auth Changes (The Source of Truth)
     const { data: { subscription } } = api.onAuthStateChange(async (_event, session) => {
-      if (isMounted && !publicUserId) {
-          setSession(session);
-          if (session?.user) {
-              try {
-                const isAdmin = await api.isSuperAdmin(session.user.id, session.user.email);
-                setIsSuperAdmin(isAdmin);
-              } catch { setIsSuperAdmin(false); }
-          } else {
-              setIsSuperAdmin(false);
+      if (!isMounted) return;
+
+      setSession(session);
+
+      if (session?.user) {
+          try {
+            // Check Admin Privileges
+            const isAdmin = await api.isSuperAdmin(session.user.id, session.user.email);
+            if (isMounted) setIsSuperAdmin(isAdmin);
+          } catch (e) {
+             console.warn("Admin check failed, defaulting to false", e);
+             if (isMounted) setIsSuperAdmin(false);
           }
+      } else {
+          if (isMounted) setIsSuperAdmin(false);
       }
+
+      // Always stop loading after auth check is done
+      if (isMounted) setIsLoading(false);
     });
 
     return () => {
@@ -78,23 +62,14 @@ const Root = () => {
   }, [publicUserId]);
 
   const handleLogout = async () => {
+      setIsLoading(true);
       await api.signOut();
       setSession(null);
       setIsSuperAdmin(false);
       setPublicUserId(null);
       window.history.pushState({}, '', window.location.pathname);
+      setIsLoading(false);
   };
-
-  if (connectionError) {
-      return (
-          <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-stone-50 text-center">
-              <WifiOff size={48} className="text-stone-300 mb-4" />
-              <h1 className="text-xl font-bold text-stone-800 mb-2">Erro de Conexão</h1>
-              <p className="text-stone-500 mb-6">Não foi possível conectar ao servidor. Verifique sua internet ou se o serviço está disponível.</p>
-              <button onClick={() => window.location.reload()} className="px-6 py-3 bg-stone-800 text-white rounded-xl">Tentar Novamente</button>
-          </div>
-      );
-  }
 
   if (isLoading) return <LoadingScreen />;
 

@@ -63,26 +63,28 @@ export const api = {
   // --- ADMIN LOGIC ---
   isSuperAdmin: async (userId: string, userEmail?: string): Promise<boolean> => {
       // 1. Whitelist Check (Priority)
-      if (userEmail && ADMIN_WHITELIST.includes(userEmail)) {
+      if (userEmail && ADMIN_WHITELIST.some(email => email.toLowerCase() === userEmail.toLowerCase())) {
         // Self-Healing: Ensure DB reflects this permission
         try {
-            const { data } = await supabase.from('profile').select('id, is_super_admin').eq('user_id', userId).maybeSingle();
+            const { data, error } = await supabase.from('profile').select('id, is_super_admin').eq('user_id', userId).maybeSingle();
             
-            if (!data) {
-                // User doesn't exist in profile table yet. Create them.
-                await supabase.from('profile').insert({
-                    user_id: userId,
-                    is_super_admin: true,
-                    status: 'active',
-                    name: 'Super Admin',
-                    work_hours: DEFAULT_HOURS
-                });
-            } else if (!data.is_super_admin) {
-                // User exists but flag is false. Update it.
-                await supabase.from('profile').update({ is_super_admin: true }).eq('user_id', userId);
+            // If connection fails here, we still return TRUE because they are whitelisted in code.
+            // We just log the error and move on.
+            if (!error) {
+                if (!data) {
+                    await supabase.from('profile').insert({
+                        user_id: userId,
+                        is_super_admin: true,
+                        status: 'active',
+                        name: 'Super Admin',
+                        work_hours: DEFAULT_HOURS
+                    });
+                } else if (!data.is_super_admin) {
+                    await supabase.from('profile').update({ is_super_admin: true }).eq('user_id', userId);
+                }
             }
         } catch (e) {
-            console.warn("Auto-fix admin failed (likely network)", e);
+            console.warn("Auto-fix admin failed (likely network), but allowing access via whitelist.", e);
         }
         return true;
       }
@@ -138,6 +140,11 @@ export const api = {
 
   // --- DATA FETCHING ---
   fetchData: async (userIdOrSlug?: string): Promise<AppData> => {
+    // If asking for the default 'novo-estudio', return default data immediately (Preview Mode)
+    if (userIdOrSlug === 'novo-estudio') {
+         return { professional: { ...DEFAULT_PROFILE, id: 'temp' }, services: [], works: [], appointments: [], careItems: [], testimonials: [] };
+    }
+
     if (!userIdOrSlug) return { professional: DEFAULT_PROFILE, services: [], works: [], appointments: [], careItems: [], testimonials: [] };
 
     try {
