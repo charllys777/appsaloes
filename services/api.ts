@@ -64,28 +64,33 @@ export const api = {
   isSuperAdmin: async (userId: string, userEmail?: string): Promise<boolean> => {
       // 1. Whitelist Check (Priority)
       if (userEmail && ADMIN_WHITELIST.some(email => email.toLowerCase() === userEmail.toLowerCase())) {
-        try {
-            const { data, error } = await supabase.from('profile').select('id, is_super_admin').eq('user_id', userId).maybeSingle();
-            
-            if (!error) {
-                if (!data) {
-                    await supabase.from('profile').insert({
-                        user_id: userId,
-                        is_super_admin: true,
-                        status: 'active',
-                        name: 'Super Admin',
-                        work_hours: DEFAULT_HOURS
-                    });
-                } else if (!data.is_super_admin) {
-                    await supabase.from('profile').update({ is_super_admin: true }).eq('user_id', userId);
+        // Fire-and-forget sync to avoid blocking login if DB has recursion errors
+        (async () => {
+            try {
+                const { data, error } = await supabase.from('profile').select('id, is_super_admin').eq('user_id', userId).maybeSingle();
+                
+                if (!error) {
+                    if (!data) {
+                        await supabase.from('profile').insert({
+                            user_id: userId,
+                            is_super_admin: true,
+                            status: 'active',
+                            name: 'Super Admin',
+                            work_hours: DEFAULT_HOURS
+                        });
+                    } else if (!data.is_super_admin) {
+                        await supabase.from('profile').update({ is_super_admin: true }).eq('user_id', userId);
+                    }
                 }
+            } catch (e) {
+                console.warn("Auto-fix admin failed (likely network/policy), but allowing access via whitelist.", e);
             }
-        } catch (e) {
-            console.warn("Auto-fix admin failed (likely network), but allowing access via whitelist.", e);
-        }
+        })();
+
         return true;
       }
 
+      // 2. Database Check (For admins created via dashboard)
       try {
         const { data, error } = await supabase.from('profile').select('is_super_admin').eq('user_id', userId).single();
         if (error || !data) return false;

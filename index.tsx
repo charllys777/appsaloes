@@ -26,17 +26,25 @@ const Root = () => {
     }
 
     let isMounted = true;
+    
+    // SAFETY NET: Force stop loading after 4 seconds no matter what
+    const safetyTimeout = setTimeout(() => {
+        if (isMounted && isLoading) setIsLoading(false);
+    }, 4000);
 
     // Helper to process session state cleanly
     const handleSessionCheck = async (currentSession: any) => {
         if (!isMounted) return;
         
-        setSession(currentSession);
+        // STRICT CHECK: The session MUST have a user object. If not, treat as null.
+        const validSession = currentSession?.user ? currentSession : null;
+        
+        setSession(validSession);
 
-        if (currentSession?.user) {
+        if (validSession?.user) {
             // Check Admin Privileges with a timeout to prevent hanging
             try {
-               const checkAdminPromise = api.isSuperAdmin(currentSession.user.id, currentSession.user.email);
+               const checkAdminPromise = api.isSuperAdmin(validSession.user.id, validSession.user.email);
                // Timeout after 3 seconds, default to false
                const timeoutPromise = new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 3000));
                
@@ -54,21 +62,22 @@ const Root = () => {
         if (isMounted) setIsLoading(false);
     };
 
-    // 1. Check Session Immediately (Fixes infinite loading on Login Screen)
-    api.getSession().then(({ data: { session } }) => {
-        handleSessionCheck(session);
+    // 1. Check Session Immediately
+    api.getSession().then(({ data }) => {
+        // Handle potential undefined data safely
+        handleSessionCheck(data?.session);
     }).catch(() => {
-        // Even if error, stop loading so user sees AuthScreen
         if (isMounted) setIsLoading(false);
     });
 
-    // 2. Setup Auth Listener for subsequent changes (Login/Logout)
+    // 2. Setup Auth Listener
     const { data: { subscription } } = api.onAuthStateChange((_event, session) => {
         handleSessionCheck(session);
     });
 
     return () => {
         isMounted = false;
+        clearTimeout(safetyTimeout);
         subscription.unsubscribe();
     };
   }, [publicUserId]);
@@ -97,7 +106,8 @@ const Root = () => {
 
   if (isSuperAdmin) return <SuperAdminDashboard onLogout={handleLogout} />;
 
-  if (!session) return <AuthScreen />;
+  // STRICT AUTH CHECK: If session is null OR session.user is missing, show AuthScreen
+  if (!session || !session.user) return <AuthScreen />;
 
   return <App session={session} />;
 };
